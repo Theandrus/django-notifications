@@ -1,0 +1,4 @@
+mysqlclient==2.0.1
+Django==4.1.1
+gunicorn==23.0.0
+djangorestframework-simplejwt>=5.2

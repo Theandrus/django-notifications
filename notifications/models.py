@@ -1,8 +1,8 @@
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
-from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import PermissionsMixin, UserManager
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
-
 
 
 class Country(models.Model):
@@ -29,6 +29,23 @@ class NotificationCategory(models.Model):
     class Meta:
         db_table = 'notification_category'
 
+class TranslationString(models.Model):
+    content_type = models.ForeignKey(
+        ContentType, on_delete=models.CASCADE, null=True, blank=True
+    )
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    related_item = GenericForeignKey('content_type', 'object_id')
+    translation_field_id = models.PositiveSmallIntegerField(null=True, blank=True)
+    language = models.ForeignKey(Language, on_delete=models.CASCADE)
+    text = models.TextField(max_length=255)
+
+    class Meta:
+        unique_together = (("content_type", "object_id", "language"),)
+        db_table = 'translation_string'
+
+    def __str__(self):
+        return f"{self.content_type} | {self.object_id} | {self.language}"
+
 
 class NotificationTemplate(models.Model):
     notification_category = models.ForeignKey(
@@ -36,6 +53,7 @@ class NotificationTemplate(models.Model):
     )
     name = models.CharField(max_length=32, null=True, blank=True)
     txt = models.TextField(null=True, blank=True)
+    translations = GenericRelation(TranslationString, related_query_name='translations')
 
     class Meta:
         db_table = "notification_template"
@@ -145,14 +163,3 @@ class UserNotificationSetting(models.Model):
         db_table = 'user_notification_setting'
 
 
-class TranslationString(models.Model):
-    content_type = models.ForeignKey(
-        "contenttypes.ContentType", on_delete=models.CASCADE, null=True, blank=True
-    )
-    object_id = models.PositiveIntegerField(null=True, blank=True)
-    translation_field_id = models.PositiveSmallIntegerField(null=True, blank=True)
-    language = models.ForeignKey(Language, on_delete=models.CASCADE)
-    text = models.TextField(null=True, blank=True)
-
-    class Meta:
-        db_table = 'translation_string'

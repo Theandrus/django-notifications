@@ -69,18 +69,18 @@ class UserNotificationSerializer(serializers.ModelSerializer):
         fields = ['id', 'notification_type', 'status', 'created', 'formatted_txt']
 
     def get_formatted_txt(self, obj):
-        template_txt = obj.notification_template.txt
-        options = UserNotificationOption.objects.filter(user_notification=obj)
+        template = obj.notification_template
+        user_language_id = self.context['request'].user.language_id
+        translated_text = template.txt
 
-        replacements = {}
-        for option in options:
-            if option.field_id == 1:
-                replacements["project_id"] = option.txt
-            elif option.field_id == 2:
-                replacements["project_name"] = option.txt
+        if user_language_id != 1:
+            if hasattr(template, 'prefetched_translations') and template.prefetched_translations:
+                translated_text = template.prefetched_translations[0].text
+
+        project_id = obj.options.filter(field_id=1).first().txt
+        project_name = obj.options.filter(field_id=2).first().txt
+
         try:
-            formatted_txt = template_txt.format(**replacements)
+            return translated_text.format(project_id=project_id, project_name=project_name)
         except KeyError as e:
-            formatted_txt = f"Error formatting notification: missing {str(e)}"
-
-        return formatted_txt
+            return f"Error formatting notification: {str(e)}"

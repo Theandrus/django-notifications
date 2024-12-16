@@ -1,14 +1,15 @@
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import Prefetch
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from .filters import NotificationFilter
-from .serializers import UserNotificationSerializer
-from .models import UserNotification, NotificationTemplate, UserNotificationOption
+from .serializers import UserNotificationSerializer, LoginSerializer
+from .models import UserNotification, NotificationTemplate, UserNotificationOption, TranslationString
 
 
 class NotificationManager:
-
     def __init__(self, user):
         self.user = user
 
@@ -48,15 +49,23 @@ class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        filters = {
-            'status': request.query_params.get('status'),
-            'notification_type': request.query_params.get('notification_type'),
-            'notification_category': request.query_params.get('notification_category'),
-        }
+        user_language_id = request.user.language_id
+        content_type = ContentType.objects.get_for_model(NotificationTemplate)
 
-        notifications = NotificationFilter.filter_notifications(request.user, filters)
-        serializer = UserNotificationSerializer(notifications, many=True)
-        return Response(serializer.data)
+        translations_prefetch = Prefetch(
+            'notification_template__translations',
+            queryset=TranslationString.objects.filter(
+                content_type=content_type,
+                language_id=user_language_id
+            ),
+            to_attr='prefetched_translations'
+        )
+
+        notifications = UserNotification.objects.filter(user=request.user).prefetch_related(translations_prefetch)
+
+        serializer = UserNotificationSerializer(notifications, many=True, context={'request': request})
+        return Response(serializer.data, status=200)
+
 
 
 class CreateNotificationView(APIView):
@@ -78,7 +87,6 @@ class CreateNotificationView(APIView):
                 project_id=project_id,
                 project_name=project_name
             )
-
             return Response({"message": "Notification created", "id": notification.id}, status=201)
 
         except ValueError as e:
@@ -107,5 +115,6 @@ class UpdateNotificationStatusView(APIView):
             return Response({"error": "Notification not found or does not belong to the user"}, status=404)
         except Exception as e:
             return Response({"error": f"An error occurred: {str(e)}"}, status=500)
+
 
 

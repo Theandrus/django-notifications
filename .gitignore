@@ -23,6 +23,7 @@ pyvenv.cfg
 # Docker logs and overrides
 *.log
 docker-compose.override.yml
+docker/mysql/data/
 
 # IDE configurations
 .idea/

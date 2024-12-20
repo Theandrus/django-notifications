@@ -1,57 +1,31 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Prefetch
+from django_filters.rest_framework.backends import DjangoFilterBackend
+from rest_framework.generics import ListAPIView
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from .filters import NotificationFilter
-from .serializers import UserNotificationSerializer, LoginSerializer
-from .models import UserNotification, NotificationTemplate, UserNotificationOption, TranslationString
+
+from .filters import UserNotificationFilter
+from .serializers import UserNotificationSerializer
+from .models import UserNotification, NotificationTemplate, UserNotificationOption, TranslationString, \
+    UserNotificationSetting
+from .services import NotificationManager
 
 
-class NotificationManager:
-    def __init__(self, user):
-        self.user = user
-
-    def create_notification(self, notification_template_id, project_id, project_name):
-        try:
-            template = NotificationTemplate.objects.get(id=notification_template_id)
-            notification = UserNotification.objects.create(
-                user=self.user,
-                notification_template=template,
-                notification_type=1,
-                status=0,
-            )
-
-            UserNotificationOption.objects.bulk_create([
-                UserNotificationOption(
-                    user_notification=notification,
-                    field_id=1,
-                    txt=str(project_id)
-                ),
-                UserNotificationOption(
-                    user_notification=notification,
-                    field_id=2,
-                    txt=project_name
-                ),
-            ])
-
-            return notification
-
-        except NotificationTemplate.DoesNotExist:
-            raise ValueError("Notification template not found")
-        except Exception as e:
-            raise RuntimeError(f"Error creating notification: {str(e)}")
-
-
-class NotificationListView(APIView):
+class NotificationListView(ListAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
+    serializer_class = UserNotificationSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = UserNotificationFilter
 
-    def get(self, request):
-        user_language_id = request.user.language_id
+    def get_queryset(self):
+        user_language_id = self.request.user.language_id
         content_type = ContentType.objects.get_for_model(NotificationTemplate)
 
+        # Prefetch translations and options
         translations_prefetch = Prefetch(
             'notification_template__translations',
             queryset=TranslationString.objects.filter(
@@ -61,11 +35,26 @@ class NotificationListView(APIView):
             to_attr='prefetched_translations'
         )
 
-        notifications = UserNotification.objects.filter(user=request.user).prefetch_related(translations_prefetch)
+        options_prefetch = Prefetch(
+            'options',
+            queryset=UserNotificationOption.objects.all()
+        )
 
-        serializer = UserNotificationSerializer(notifications, many=True, context={'request': request})
-        return Response(serializer.data, status=200)
+        # Fetch user notification settings and filter by type
+        user_settings = UserNotificationSetting.objects.filter(user=self.request.user).first()
+        notification_type_filter = []
+        if user_settings:
+            if user_settings.system_notification:
+                notification_type_filter.append(0)
+            if user_settings.push_notification:
+                notification_type_filter.append(1)
+        else:
+            notification_type_filter = [0]  # Default to system notifications
 
+        return UserNotification.objects.filter(
+            user=self.request.user,
+            notification_type__in=notification_type_filter
+        ).prefetch_related(translations_prefetch, options_prefetch)
 
 
 class CreateNotificationView(APIView):
@@ -76,21 +65,25 @@ class CreateNotificationView(APIView):
         user = request.user
         data = request.data
 
-        notification_template_id = data.get('notification_template_id')
-        project_id = data.get('project_id')
-        project_name = data.get('project_name')
-
         try:
-            manager = NotificationManager(user)
-            notification = manager.create_notification(
-                notification_template_id=notification_template_id,
-                project_id=project_id,
-                project_name=project_name
-            )
-            return Response({"message": "Notification created", "id": notification.id}, status=201)
+            notification_template_id = data.get("notification_template_id")
+            args = data.get("args", [])  # Ensure args is a list
 
-        except ValueError as e:
-            return Response({"error": str(e)}, status=400)
+            if not isinstance(args, list):
+                return Response({"error": "Invalid 'args' format. Must be a list."}, status=400)
+
+            # Fetch the template to validate
+            manager = NotificationManager(user)
+            notification = manager.create_notification(notification_template_id, *args)
+
+            return Response(
+                {"message": "Notification created successfully", "id": notification.id},
+                status=201
+            )
+        except NotificationTemplate.DoesNotExist:
+            return Response({"error": "Notification template not found."}, status=404)
+        except ValueError as ve:
+            return Response({"error": f"{str(ve)}"}, status=400)
         except Exception as e:
             return Response({"error": f"An error occurred: {str(e)}"}, status=500)
 

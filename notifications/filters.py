@@ -1,21 +1,14 @@
-from .models import UserNotification
+import django_filters
+from notifications.models import UserNotification
 
-class NotificationFilter:
+class UserNotificationFilter(django_filters.FilterSet):
+    status = django_filters.NumberFilter(field_name='status', label='Status')
+    notification_type = django_filters.NumberFilter(field_name='notification_type', label='Notification Type')
+    notification_category = django_filters.NumberFilter(
+        field_name='notification_template__notification_category__id', label='Notification Category'
+    )
 
-    @staticmethod
-    def filter_notifications(user, filters):
+    class Meta:
+        model = UserNotification
+        fields = ['status', 'notification_type', 'notification_category']
 
-        notifications = UserNotification.objects.filter(user=user)
-
-        if filters.get('status') is not None:
-            notifications = notifications.filter(status=filters['status'])
-
-        if filters.get('notification_type') is not None:
-            notifications = notifications.filter(notification_type=filters['notification_type'])
-
-        if filters.get('notification_category') is not None:
-            notifications = notifications.filter(
-                notification_template__notification_category__id=filters['notification_category']
-            )
-
-        return notifications
